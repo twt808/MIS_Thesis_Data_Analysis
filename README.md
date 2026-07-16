@@ -15,7 +15,7 @@ This repository contains the R Markdown analysis pipeline and the corresponding 
 
 The files are provided to improve the transparency, traceability, and reproducibility of the data-preparation and statistical-analysis procedures reported in Chapters 4 and 5 of the thesis. The analysis was conducted in RStudio using a single R Markdown workflow.
 
-## Repository files
+## Repository Files
 
 | File | Description |
 |---|---|
@@ -24,7 +24,7 @@ The files are provided to improve the transparency, traceability, and reproducib
 
 > Update the filenames in this README if the files in the repository use different names.
 
-## Purpose of the analysis
+## Purpose of the Analysis
 
 The analysis examines how university students perceive, avoid, and cope with cognitive risks associated with the use of Generative Artificial Intelligence in higher education. It applies an extended Technology Threat Avoidance Theory framework and examines:
 
@@ -33,7 +33,7 @@ The analysis examines how university students perceive, avoid, and cope with cog
 - threat-appraisal, coping-appraisal, Avoidance Motivation, and coping-behaviour relationships; and
 - students’ expectations regarding institutional measures for safer and more responsible GenAI use.
 
-## Analysis workflow
+## Analysis Workflow
 
 The R Markdown pipeline documents the main stages of the analysis:
 
@@ -57,7 +57,7 @@ The R Markdown pipeline documents the main stages of the analysis:
 
 The final analytical sample used in the thesis contained **139 complete responses**.
 
-## Analytical approach
+## Analytical Approach
 
 The pipeline includes:
 
@@ -74,7 +74,7 @@ The pipeline includes:
 
 Open-ended survey responses were treated as supplementary descriptive material and were not analysed as an independent qualitative dataset.
 
-## Software requirements
+## Software Requirements
 
 The analysis was developed in **RStudio** using **R Markdown**.
 
@@ -93,7 +93,7 @@ install.packages("package_name")
 
 The exact packages required should be identified from the library-loading section at the beginning of the R Markdown file.
 
-## Reproducing the analysis
+## Reproducing the Analysis
 
 The repository does **not** include the raw survey data. Therefore, the full analysis cannot be rerun from the public repository alone.
 
@@ -108,7 +108,7 @@ An authorised researcher with access to the original data can reproduce the work
 
 The cleaned analytical dataset is recreated within the R Markdown workflow rather than being stored as a separate public data file.
 
-## Data availability and confidentiality
+## Data Availability and Confidentiality
 
 The raw survey data are not publicly available because they were collected from human participants under University of Canberra ethics approval and are subject to research-data management, confidentiality, and secure-storage requirements.
 
@@ -116,7 +116,7 @@ The main survey was designed to collect anonymous responses. Optional contact in
 
 The exclusion of the raw data means that this repository supports transparency and verification of the analytical procedures and reported outputs, but not unrestricted reproduction by users who do not have authorised data access.
 
-## Relationship to the thesis
+## Relationship to the Thesis
 
 The R Markdown file documents the data preparation and analysis procedures described in **Chapter 4: Research Design and Methodology**.
 
@@ -124,7 +124,7 @@ The knitted HTML file contains the analytical outputs supporting **Chapter 5: Da
 
 The repository is referenced in **Appendix E: Data Analysis Pipeline (R Markdown and Output File)** of the thesis.
 
-## Viewing the HTML output
+## Viewing the HTML Output
 
 The HTML file is a static record of the knitted R Markdown analysis. Depending on the browser and GitHub settings, GitHub may display the file source or prompt the user to download it rather than render it as a webpage.
 
@@ -133,7 +133,7 @@ The HTML file is a static record of the knitted R Markdown analysis. Depending o
 
 When referring to the analytical materials in this repository, the following format may be used:
 
-> Wangchuk, T. (2026). *Data analysis pipeline for Conceptualising Technology Threat Avoidance Theory (TTAT) to Examine Cognitive Risks of Generative AI in Higher Education* [R Markdown and HTML files]. GitHub. `[Insert repository URL]`
+> Wangchuk, T. (2026). *Data analysis pipeline for Conceptualising Technology Threat Avoidance Theory (TTAT) to Examine Cognitive Risks of Generative AI in Higher Education* [R Markdown and HTML files]. GitHub. `[[Insert repository URL]](https://github.com/twt808/MIS_Thesis_Data_Analysis/edit/main/README.md)`
 
 ## Ethics
 
@@ -144,9 +144,3 @@ The study received approval from the University of Canberra Human Research Ethic
 **Tshering Wangchuk**  
 Master of Information Science (Research)  
 University of Canberra  
-
-Contact details may be added here if a public research email address is available.
-
-## Licence
-
-No licence has been specified in this draft. Add an appropriate software or research-output licence before public reuse or redistribution is permitted.
