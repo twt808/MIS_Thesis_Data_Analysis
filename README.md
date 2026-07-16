@@ -133,7 +133,7 @@ The HTML file is a static record of the knitted R Markdown analysis. Depending o
 
 When referring to the analytical materials in this repository, the following format may be used:
 
-> Wangchuk, T. (2026). *Data analysis pipeline for Conceptualising Technology Threat Avoidance Theory (TTAT) to Examine Cognitive Risks of Generative AI in Higher Education* [R Markdown and HTML files]. GitHub. `[[Insert repository URL]](https://github.com/twt808/MIS_Thesis_Data_Analysis/edit/main/README.md)`
+> Wangchuk, T. (2026). *Data analysis pipeline for Conceptualising Technology Threat Avoidance Theory (TTAT) to Examine Cognitive Risks of Generative AI in Higher Education* [R Markdown and HTML files]. GitHub. `(https://github.com/twt808/MIS_Thesis_Data_Analysis/edit/main/README.md)`
 
 ## Ethics
 
