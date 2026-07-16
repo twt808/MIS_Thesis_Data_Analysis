@@ -1,6 +1,6 @@
 # Data Analysis Pipeline for the Master’s Thesis
 
-## Project title
+## Project Title
 
 **Conceptualising Technology Threat Avoidance Theory (TTAT) to Examine Cognitive Risks of Generative AI in Higher Education**
 
