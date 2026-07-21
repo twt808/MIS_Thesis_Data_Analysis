@@ -1,0 +1,1881 @@
+---
+title: "Data Analysis Pipeline"
+author: "Tshering Wangchuk (u3254369)"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+description: >
+  Reproducible R Markdown analysis for the thesis titled "Conceptualising Technology Threat
+  Avoidance Theory (TTAT) to Examine Cognitive Risks of Generative AI in Higher Education".
+  The workflow documents REDCap data import, quality screening, factor encoding, sample
+  profiling, reliability testing, TTAT construct scoring, descriptive analysis, exploratory
+  visualisation, testing of 12 hypotheses, regression diagnostics, and open-ended response
+  extraction.
+output:
+  rmdformats::readthedown:
+    self_contained: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center"
+)
+
+set.seed(123)  # Ensures reproducible jittered plots and any random procedures added later.
+```
+
+```{r pandoc-path-helper, eval=FALSE, echo=FALSE}
+# Optional macOS helper only: uncomment and adjust if RStudio cannot find Pandoc.
+Sys.setenv(RSTUDIO_PANDOC="/opt/homebrew/bin")
+```
+
+## Research Context
+
+<div style="text-align: justify;">
+
+**Research Title:** Conceptualising Technology Threat Avoidance Theory (TTAT) to Examine Cognitive Risks of Generative AI in Higher Education
+
+**Candidate:** Tshering Wangchuk (u3254369), Master of Information Science (Research), Faculty of Science and Technology, University of Canberra
+
+The data analysis pipeline is conducted for a quantitative survey study examining how university students perceive and respond to cognitive risks associated with GenAI use in higher education. The study adapts Technology Threat Avoidance Theory (TTAT) to model students' threat appraisal, coping appraisal, avoidance motivation, coping behaviours, and expectations for institutional support.
+
+The analysis is organised around four research objectives:
+
+1. To identify the cognitive risks students perceive when using GenAI, including cognitive offloading, reduced critical thinking, superficial learning, overreliance, and reduced problem-solving.
+2. To examine whether demographic and experiential factors, including age, faculty, study level, prior GenAI experience, and confidence, are associated with perceived cognitive threat.
+3. To evaluate how threat appraisal and coping appraisal relate to avoidance motivation and coping behaviours.
+4. To identify the institutional measures (such as guidelines, training, critical GenAI-integrated assessment design, faculty training, and GenAI-use documentation) students expect HEIs to implement to mitigate cognitive risks, and to examine whether perceived threat and perceived avoidability predict these expectations.
+
+RO1 is addressed through descriptive and visual analysis. The 12 hypotheses, numbered H1a–H3b, test the relationships associated with RO2, RO3, and RO4.
+
+The script is designed to be transparent and reproducible.
+
+</div>
+
+## 1. Package Loading and Helper Functions
+
+<div style="text-align: justify;">
+
+This section loads the R packages required for the full analysis pipeline and defines reusable helper functions for validation, frequency tables, plots, p-value formatting, unstandardised regression-coefficient extraction, hypothesis decisions, and regression diagnostics.
+
+If any package is missing, the document stops with a clear installation message; otherwise, the helper functions are available for all later sections.
+
+</div>
+
+```{r packages-and-helpers}
+# Required packages for the data analysis pipeline
+required_packages <- c(
+  "tidyverse",  # Data import, wrangling, and ggplot2 visualisation
+  "psych",      # Cronbach's alpha, skewness, and kurtosis
+  "gridExtra",  # Multi-plot layouts
+  "grid",       # Plot grid titles
+  "car",        # VIF and regression diagnostics
+  "rmdformats"  # ReadTheDown HTML output format
+)
+
+# Check if the required packages are missing or not
+missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
+if (length(missing_packages) > 0) {
+  stop("Please install the following packages before knitting: ", paste(missing_packages, collapse = ", "))
+}
+
+# Load the required packages into the environment
+invisible(lapply(required_packages, library, character.only = TRUE))
+
+# Format p-values consistently for reports.
+format_p <- function(p, digits = 3) {
+  ifelse(is.na(p), NA_character_, ifelse(p < .001, "< .001", sprintf(paste0("%.", digits, "f"), p)))
+}
+
+# Check that expected columns are present before analysis proceeds.
+check_required_columns <- function(df, cols, step = "this analysis step") {
+  missing_cols <- setdiff(cols, names(df))
+  if (length(missing_cols) > 0) {
+    stop("Missing column(s) required for ", step, ": ", paste(missing_cols, collapse = ", "))
+  }
+  invisible(TRUE)
+}
+
+# Convert blank strings to NA across character columns.
+clean_blank_strings <- function(df) {
+  df %>% mutate(across(where(is.character), ~ na_if(trimws(.x), "")))
+}
+
+# Return TRUE when all non-missing values in a row are identical.
+check_straightline <- function(df, cols) {
+  check_required_columns(df, cols, "straightlining checks")
+  apply(df[, cols, drop = FALSE], 1, function(x) length(unique(na.omit(x))) == 1)
+}
+
+# Build a frequency table with counts and percentages.
+freq_table <- function(df, var, label) {
+  out <- df %>%
+    count(.data[[var]], name = "Count") %>%
+    mutate(`Percentage (%)` = round(Count / sum(Count) * 100, 1))
+  names(out)[1] <- label
+  knitr::kable(out, row.names = FALSE)
+}
+
+# Create a reusable bar chart for categorical variables.
+plot_bar <- function(df, var, title, xlabel) {
+  ggplot(df, aes(x = .data[[var]])) +
+    geom_bar(fill = "steelblue", colour = "white") +
+    geom_text(stat = "count", aes(label = after_stat(count)), vjust = -0.5, size = 3.5) +
+    labs(title = title, x = xlabel, y = "Count") +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      plot.title = element_text(face = "bold")
+    )
+}
+
+# Create a reusable boxplot for composite construct scores by group.
+plot_construct_box <- function(df, construct, group_var, construct_label) {
+  ggplot(df, aes(x = .data[[group_var]], y = .data[[construct]], fill = .data[[group_var]])) +
+    geom_boxplot(alpha = 0.7, outlier.colour = "red", outlier.size = 1.5) +
+    geom_hline(yintercept = 3, linetype = "dashed", colour = "grey50", linewidth = 0.4) +
+    scale_y_continuous(limits = c(1, 5), breaks = 1:5) +
+    labs(title = construct_label, x = NULL, y = "Score (1–5)") +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      axis.text.x = element_text(size = 12, angle = 45, hjust = 1),
+      axis.text.y = element_text(size = 12),
+      axis.title.y = element_text(size = 12),
+      legend.position = "none"
+    )
+}
+
+# Create a reusable scatter plot with an OLS trend line.
+scatter_plot <- function(df, x_var, y_var, x_lab, y_lab, title) {
+  ggplot(df, aes(x = .data[[x_var]], y = .data[[y_var]])) +
+    geom_point(alpha = 0.5, colour = "steelblue") +
+    geom_smooth(method = "lm", se = TRUE, colour = "red") +
+    labs(title = title, x = x_lab, y = y_lab) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 10, face = "bold", hjust = 0.5),
+      axis.text.x = element_text(size = 7, angle = 45, hjust = 1),
+      axis.text.y = element_text(size = 7),
+      axis.title.y = element_text(size = 8)
+    )
+}
+
+# Extract the unstandardised coefficient (B) and p-value for a term in an lm object.
+get_Bp <- function(model, term) {
+  co <- coef(summary(model))
+  if (!term %in% rownames(co)) {
+    return(c(B = NA_real_, p = NA_real_))
+  }
+  c(B = unname(co[term, "Estimate"]), p = unname(co[term, "Pr(>|t|)"]))
+}
+
+# Return R-squared and adjusted R-squared for an lm object.
+get_r2 <- function(model) summary(model)$r.squared
+get_adj_r2 <- function(model) summary(model)$adj.r.squared
+
+# Apply the study's directional hypothesis-decision rule using unrounded values.
+hypothesis_decision <- function(B, p, predicted_direction, alpha = .05) {
+  case_when(
+    is.na(B) | is.na(p) ~ "Check manually",
+    predicted_direction == "Positive" & B > 0 & p < alpha ~ "Supported",
+    predicted_direction == "Negative" & B < 0 & p < alpha ~ "Supported",
+    TRUE ~ "Not supported"
+  )
+}
+
+# Optional diagnostic plots for any fitted lm model. Run manually to avoid overcrowding the report.
+diagnose_lm <- function(model, model_name = "Linear model") {
+  old_par <- par(no.readonly = TRUE)
+  on.exit(par(old_par))
+  par(mfrow = c(2, 2))
+  plot(model, main = model_name)
+}
+```
+
+## 2. Data Import and Merging
+
+<div style="text-align: justify;">
+
+This section imports the two REDCap CSV exports (`data_1.csv` and `data_2.csv`), checks that the files are available in the working directory, filters the first export to remove records previously identified as suspicious, and merges both exports into one raw working dataset.
+
+</div>
+
+```{r data-import}
+# Print working directory
+cat("Working directory:", getwd(), "\n")
+
+# CSV files exported from REDCap are named data_1 and data_2
+# Check if the files are in working directory
+input_files <- c("data_1.csv", "data_2.csv")
+missing_input_files <- input_files[!file.exists(input_files)]
+if (length(missing_input_files) > 0) {
+  stop("Missing input file(s): ", paste(missing_input_files, collapse = ", "),
+       ". Place the REDCap CSV files in the working directory before knitting.")
+}
+
+# Import the files
+# Preserve the literal code "NA" used for "Prefer not to say"; blank cells are
+# converted to missing values during cleaning.
+survey_raw_data_1 <- read_csv("data_1.csv", na = "", show_col_types = FALSE)
+survey_raw_data_2 <- read_csv("data_2.csv", na = "", show_col_types = FALSE)
+
+# Remove the previously identified suspicious responses from Version 1 (record_id > 71).
+if ("record_id" %in% names(survey_raw_data_1)) {
+  survey_raw_data_1 <- survey_raw_data_1 %>% filter(record_id <= 71)
+}
+
+# Align Version 2 to the Version 1 column structure and merge the two datasets.
+survey_raw_data <- bind_rows(
+  survey_raw_data_1,
+  survey_raw_data_2 %>% select(any_of(names(survey_raw_data_1)))
+)
+
+cat("Merged dataset — Rows:", nrow(survey_raw_data), "| Columns:", ncol(survey_raw_data), "\n")
+```
+
+## 3. Data Cleaning and Quality Screening
+
+<div style="text-align: justify;">
+
+This section prepares the merged REDCap dataset for statistical analysis. It removes system variables, treats blank text as missing values, separates required and optional fields, assesses response completeness, keeps only complete required responses for quantitative analysis, checks for exact duplicate rows, maps survey items to TTAT constructs, validates response codes, and flags potential straightlining.
+
+</div>
+
+### 3.1 Remove REDCap System Columns
+
+<div style="text-align: justify;">
+
+This subsection removes REDCap administrative fields that are not part of the analytical survey instrument, such as record identifiers, survey timestamps, and completion status fields. Blank strings are also converted to `NA` so that missing values are handled consistently.
+
+</div>
+
+
+```{r remove-system-columns}
+# Define REDCap system columns
+system_cols <- c(
+  "record_id",
+  "redcap_survey_identifier",
+  "main_survey_data_timestamp",
+  "main_survey_data_complete"
+)
+
+# Remove REDCap system columns
+survey_data <- survey_raw_data %>%
+  select(-any_of(system_cols)) %>%
+  clean_blank_strings()
+
+cat("After removing system columns — Rows:", nrow(survey_data), "| Columns:", ncol(survey_data), "\n")
+```
+
+### 3.2 Define Optional and Required Fields
+
+<div style="text-align: justify;">
+
+This subsection separates optional survey fields from required analytical fields. Optional fields include the free-text faculty field, the multi-select cognitive-risk concern checkboxes, and open-ended questions, because these can legitimately be blank.
+
+</div>
+
+```{r define-required-fields}
+# Optional columns
+optional_cols <- c(
+  "other_faculty",
+  paste0("cognitive_risk_concerns___", 1:5),
+  "improvement_needed",
+  "risk_influence",
+  "eim_from_institution"
+)
+
+optional_cols <- intersect(optional_cols, names(survey_data))
+required_cols <- setdiff(names(survey_data), optional_cols)
+
+cat("Optional fields:", length(optional_cols),
+    "| Required fields:", length(required_cols),
+    "| Total fields:", ncol(survey_data), "\n")
+
+stopifnot(length(optional_cols) + length(required_cols) == ncol(survey_data))
+```
+
+### 3.3 Response Completeness Assessment
+
+<div style="text-align: justify;">
+
+This subsection calculates how complete each response is across the required fields. It creates three quality-screening variables: `completion_rate`, `missing_required`, and `completion_quality`.
+
+</div>
+
+
+```{r completeness-assessment}
+# Using the optional and required columns, create 3 columns (completion_rate, missing_required and completion_quality)
+survey_data <- survey_data %>%
+  mutate(
+    completion_rate = 1 - rowMeans(is.na(pick(all_of(required_cols)))),
+    missing_required = rowSums(is.na(pick(all_of(required_cols)))),
+    completion_quality = factor(
+      case_when(
+        completion_rate == 1   ~ "Complete",
+        completion_rate >= 0.8 ~ "High",
+        completion_rate >= 0.5 ~ "Medium",
+        TRUE                   ~ "Low"
+      ),
+      levels = c("Low", "Medium", "High", "Complete"),
+      ordered = TRUE
+    )
+  )
+
+# Completion quality table for the responses
+knitr::kable(
+  as.data.frame(table(survey_data$completion_quality)) %>%
+    rename(Completion = Var1, Count = Freq),
+  caption = "Response completeness classification based on required fields."
+)
+```
+
+```{r completion-histogram, fig.width=8, fig.height=5}
+# Distribution of response completion rates
+hist(
+  survey_data$completion_rate * 100,
+  breaks = 10,
+  col = "steelblue",
+  main = "Distribution of Response Completion Rates",
+  xlab = "Completion Rate (% of Required Fields Answered)",
+  ylab = "Number of Responses",
+  xlim = c(0, 100),
+  xaxt = "n"
+)
+axis(1, at = seq(0, 100, 10), labels = paste0(seq(0, 100, 10), "%"))
+```
+
+### 3.4 Filter to Complete Required Responses
+
+<div style="text-align: justify;">
+
+This subsection retains only responses classified as `Complete` across all required analytical fields. This ensures that construct scores and hypothesis tests are calculated from observed responses rather than imputed values.
+
+</div>
+
+```{r complete-response-filter}
+# Filter out responses where completion quality is not Complete
+data <- survey_data %>% filter(completion_quality == "Complete")
+
+cat("Responses retained for analysis:", nrow(data), "\n")
+
+remaining_missing <- colSums(is.na(data))
+remaining_missing <- remaining_missing[remaining_missing > 0]
+remaining_missing
+```
+
+### 3.5 Duplicate Record Check
+
+<div style="text-align: justify;">
+
+This subsection checks whether any rows in the complete analytical dataset are exact duplicates across all retained variables. The check intentionally ignores a newly created row identifier so that duplication is assessed from the actual survey content.
+
+The expected output is either a confirmation that no exact duplicates were found or a review table showing the duplicate groups and key demographic/experiential fields.
+
+</div>
+
+```{r duplicate-record-check}
+
+# Check for exact duplicate rows in the dataset.
+data_with_row_id <- data %>%
+  mutate(analysis_row_id = row_number(), .before = 1)
+
+duplicate_key_cols <- setdiff(names(data_with_row_id), "analysis_row_id")
+
+duplicate_records <- data_with_row_id %>%
+  group_by(across(all_of(duplicate_key_cols))) %>%
+  mutate(
+    duplicate_group_size = n(),
+    duplicate_group = cur_group_id()
+  ) %>%
+  ungroup() %>%
+  filter(duplicate_group_size > 1) %>%
+  select(duplicate_group, duplicate_group_size, analysis_row_id, everything()) %>%
+  arrange(duplicate_group, analysis_row_id)
+
+if (nrow(duplicate_records) == 0) {
+  cat("Exact duplicate check: no exact duplicate records found in the complete analytical dataset.\n")
+} else {
+  cat(
+    "Exact duplicate check:", nrow(duplicate_records),
+    "rows belong to", n_distinct(duplicate_records$duplicate_group),
+    "duplicate group(s). Review duplicate_records before continuing.\n"
+  )
+
+  duplicate_display_cols <- c(
+    "duplicate_group", "duplicate_group_size", "analysis_row_id",
+    "gender", "age_group", "faculty", "study_level", "enrollment_type",
+    "genai_exp_in_duration", "confidence_level"
+  )
+
+  duplicate_records %>%
+    select(any_of(duplicate_display_cols)) %>%
+    knitr::kable(
+      caption = "Potential exact duplicate records in the complete analytical dataset."
+    )
+}
+```
+
+### 3.6 Survey Structure and Construct Mapping
+
+<div style="text-align: justify;">
+
+This subsection defines the survey-item groupings used throughout the analysis. It maps item columns to TTAT constructs such as perceived susceptibility, perceived severity, perceived effectiveness, perceived costs, self-efficacy, avoidance motivation, problem-focused coping, emotion-focused coping, and expected institutional measures.
+
+</div>
+
+```{r construct-mapping}
+# Vector
+cognitive_risk_domains <- c(
+  "cognitive_offloading",
+  "reduced_thinking",
+  "superficial_learning",
+  "over_reliance",
+  "reduced_prob_solving"
+)
+
+strategy_domains <- c(
+  "fact_checking",
+  "editing",
+  "brainstorming",
+  "check_outputs",
+  "limit_use"
+)
+
+# List
+construct_items <- list(
+  "Perceived Susceptibility" = paste0("sus_", cognitive_risk_domains),
+  "Perceived Severity" = paste0("sev_", cognitive_risk_domains),
+  "Perceived Effectiveness" = paste0("eff_", strategy_domains),
+  "Perceived Costs" = paste0("cost_", strategy_domains),
+  "Self-Efficacy" = paste0("se_", strategy_domains),
+  "Avoidance Motivation" = c("am_implement_strategy", "am_limit_use", "am_fact_check", "am_prioritze_risk", "am_reduce_use"),
+  "Problem-Focused Coping" = c("pfc_fact_check", "pfc_editing", "pfc_brain_storming", "pfc_cross_check", "pfc_limit_use"),
+  "Emotion-Focused Coping" = c("efc_denial", "efc_distancing", "efc_normalization", "efc_benefit_focused", "efc_optimism_bias"),
+  "Expected Institutional Measures" = c("eim_guidelines", "eim_training", "eim_critical_integration", "eim_faculty_training", "eim_documentation")
+)
+
+likert_cols <- unique(c(unlist(construct_items), "confidence_level"))
+checkbox_cols <- paste0("cognitive_risk_concerns___", 1:5)
+
+check_required_columns(data, likert_cols, "Likert-scale validation")
+check_required_columns(data, checkbox_cols, "checkbox validation")
+```
+
+### 3.7 Validate Expected Values
+
+<div style="text-align: justify;">
+
+This subsection checks whether the cleaned dataset contains only expected survey codes. Likert-scale items should be coded from 1 to 5, checkbox items should be coded as 0 or 1, and categorical variables should match their REDCap coding scheme before factor conversion.
+
+</div>
+
+
+```{r validation-checks}
+# Likert-scale items should contain values 1–5.
+likert_validation <- data %>%
+  select(all_of(likert_cols)) %>%
+  summarise(across(everything(), ~ sum(!.x %in% 1:5, na.rm = TRUE))) %>%
+  pivot_longer(everything(), names_to = "column", values_to = "n_invalid") %>%
+  filter(n_invalid > 0)
+
+if (nrow(likert_validation) == 0) {
+  cat("Likert-scale items: all values are within 1–5. ✓\n")
+} else {
+  knitr::kable(likert_validation, caption = "Likert-scale columns with invalid values.")
+}
+
+# Checkbox columns should contain 0 or 1.
+checkbox_validation <- data %>%
+  select(all_of(checkbox_cols)) %>%
+  summarise(across(everything(), ~ sum(!.x %in% c(0, 1), na.rm = TRUE))) %>%
+  pivot_longer(everything(), names_to = "column", values_to = "n_invalid") %>%
+  filter(n_invalid > 0)
+
+if (nrow(checkbox_validation) == 0) {
+  cat("Checkbox items: all values are 0 or 1. ✓\n")
+} else {
+  knitr::kable(checkbox_validation, caption = "Checkbox columns with invalid values.")
+}
+
+# Categorical variables are checked before factor conversion.
+expected_values <- list(
+  gender = c("F", "M", "NB", "NA"),
+  age_group = c("18_to_24", "btw_25_29", "btw_30_34", "btw_35_39", "over_40"),
+  faculty = c("AD", "BGL", "E", "H", "ST", "OTH"),
+  study_level = c(1, 2, 3),
+  enrollment_type = c("D", "I"),
+  genai_exp_in_duration = c(1, 2, 3, 4, 5),
+  guideline_clearance = c(1, 2, 3),
+  training_received = c(1, 2, 3)
+)
+
+categorical_validation <- purrr::imap_dfr(expected_values, function(valid_values, var) {
+  if (!var %in% names(data)) {
+    return(tibble(variable = var, unexpected_value = "COLUMN MISSING"))
+  }
+  unexpected <- setdiff(as.character(unique(na.omit(data[[var]]))), as.character(valid_values))
+  tibble(variable = var, unexpected_value = unexpected)
+})
+
+if (nrow(categorical_validation) == 0) {
+  cat("Categorical fields: all values match expected codes.\n")
+} else {
+  knitr::kable(categorical_validation, caption = "Categorical variables with unexpected values.")
+}
+```
+
+### 3.8 Straightlining Check
+
+<div style="text-align: justify;">
+
+This subsection flags possible straightlining, where a respondent selects the same response option across all five items within a construct. Straightlining is treated as a diagnostic indicator rather than an automatic exclusion rule.
+
+</div>
+
+```{r straightlining-check}
+straightline_names <- c("PSus", "PSev", "PEff", "PCost", "PSE", "PAM", "PPFC", "PEFC", "PEIM")
+straightline_constructs <- construct_items
+names(straightline_constructs) <- straightline_names
+
+straightline_flags <- purrr::imap_dfc(
+  straightline_constructs,
+  ~ tibble(!!paste0("straightline_", .y) := check_straightline(data, .x))
+)
+
+data <- bind_cols(data, straightline_flags)
+straightline_cols <- names(straightline_flags)
+
+cat("Respondents straightlining in at least one construct:",
+    sum(rowSums(data[, straightline_cols]) > 0), "\n")
+
+cat("Respondents straightlining in all checked constructs:",
+    sum(rowSums(data[, straightline_cols]) == length(straightline_cols)), "\n")
+
+straightline_summary <- data %>%
+  summarise(across(all_of(straightline_cols), sum)) %>%
+  pivot_longer(everything(), names_to = "Construct", values_to = "Straightlined_n")
+
+knitr::kable(straightline_summary, caption = "Number of respondents straightlining within each construct.")
+```
+
+## 4. Factor Encoding
+
+<div style="text-align: justify;">
+
+This section converts raw REDCap category codes into human-readable factor labels for demographic and survey variables. Ordered factors are used where the categories have a logical progression, such as age group, study level, GenAI experience, and confidence. Separate numeric score versions of GenAI experience and confidence are retained for directional regression and scatterplots.
+
+</div>
+
+```{r factor-encoding}
+factor_source_cols <- c(
+  "gender", "age_group", "faculty", "study_level", "enrollment_type",
+  "genai_exp_in_duration", "guideline_clearance", "training_received",
+  "confidence_level"
+)
+check_required_columns(data, factor_source_cols, "factor encoding")
+
+str(data %>% select(all_of(factor_source_cols)))
+
+genai_experience_labels <- c(
+  "Never",
+  "Less than 6 months",
+  "6–12 months",
+  "1–2 years",
+  "2+ years"
+)
+
+confidence_labels <- c(
+  "Not confident at all",
+  "Slightly confident",
+  "Neutral",
+  "Confident",
+  "Extremely confident"
+)
+
+data <- data %>%
+  mutate(
+    # Preserve numeric versions before converting the original columns to factors
+    genai_exp_in_duration_numeric = as.integer(as.character(genai_exp_in_duration)),
+    confidence_level_numeric = as.integer(as.character(confidence_level)),
+
+
+    gender = factor(gender,
+                    levels = c("F", "M", "NB", "NA"),
+                    labels = c("Female", "Male", "Non-binary", "Prefer not to say")),
+    age_group = factor(age_group,
+                       levels = c("18_to_24", "btw_25_29", "btw_30_34", "btw_35_39", "over_40"),
+                       labels = c("18–24", "25–29", "30–34", "35–39", "40+"),
+                       ordered = TRUE),
+    faculty = factor(faculty,
+                     levels = c("AD", "BGL", "E", "H", "ST", "OTH"),
+                     labels = c("Arts & Design", "Business, Govt & Law", "Education", "Health", "Science & Technology", "Others")),
+    study_level = factor(study_level,
+                         levels = c(1, 2, 3),
+                         labels = c("Undergraduate", "Postgraduate (Coursework)", "Higher Degree by Research"),
+                         ordered = TRUE),
+    enrollment_type = factor(enrollment_type,
+                             levels = c("D", "I"),
+                             labels = c("Domestic", "International")),
+    genai_exp_in_duration = factor(
+      genai_exp_in_duration_numeric,
+      levels = 1:5,
+      labels = genai_experience_labels,
+      ordered = TRUE
+    ),
+    confidence_level = factor(
+      confidence_level_numeric,
+      levels = 1:5,
+      labels = confidence_labels,
+      ordered = TRUE
+    ),
+    guideline_clearance = factor(guideline_clearance,
+                                 levels = c(1, 2, 3),
+                                 labels = c("Yes", "No", "Unsure")),
+    training_received = factor(training_received,
+                               levels = c(1, 2, 3),
+                               labels = c("Yes", "No", "Unsure"))
+  )
+
+str(data %>% select(
+  gender, age_group, faculty, study_level, enrollment_type,
+  genai_exp_in_duration, genai_exp_in_duration_numeric,
+  confidence_level, confidence_level_numeric,
+  guideline_clearance, training_received
+))
+```
+
+## 5. Sample Profile and Demographic Frequencies
+
+<div style="text-align: justify;">
+
+This section describes the analytical sample using demographic and experiential variables. It summarises who participated in the study and their GenAI-related background before examining construct patterns and hypothesis relationships.
+
+</div>
+
+### 5.1 Frequency Tables
+
+<div style="text-align: justify;">
+
+This subsection produces count and percentage tables for key demographic and experiential variables.
+
+</div>
+
+
+```{r frequency-tables}
+freq_table(data, "gender", "Gender")
+freq_table(data, "age_group", "Age Group")
+freq_table(data, "faculty", "Faculty")
+freq_table(data, "study_level", "Study Level")
+freq_table(data, "enrollment_type", "Enrolment Type")
+freq_table(data, "genai_exp_in_duration", "GenAI Experience")
+freq_table(data, "confidence_level", "Confidence in Using GenAI")
+freq_table(data, "training_received", "Training Received")
+freq_table(data, "guideline_clearance", "Guideline Clarity")
+```
+
+### 5.2 Demographic and Experiential Bar Charts
+
+<div style="text-align: justify;">
+
+This subsection converts the frequency information into bar charts for easier visual comparison across categories.
+
+</div>
+
+
+```{r demographic-bar-charts, fig.width=14, fig.height=12}
+bar_plots <- list(
+  plot_bar(data, "gender", "Gender", "Gender"),
+  plot_bar(data, "age_group", "Age Group", "Age Group"),
+  plot_bar(data, "faculty", "Faculty", "Faculty"),
+  plot_bar(data, "study_level", "Study Level", "Study Level"),
+  plot_bar(data, "enrollment_type", "Enrolment Type", "Enrolment Type"),
+  plot_bar(data, "genai_exp_in_duration", "GenAI Experience", "GenAI Experience"),
+  plot_bar(data, "confidence_level", "Confidence in Using GenAI", "Confidence in Using GenAI")
+)
+
+grid.arrange(
+  grobs = bar_plots,
+  ncol = 3
+)
+```
+
+## 6. Reliability Analysis
+
+<div style="text-align: justify;">
+
+This section assesses the internal consistency of each directly measured multi-item construct using Cronbach's alpha. Each construct is expected to contain five Likert-type items aligned with the survey instrument and TTAT framework.
+
+</div>
+
+```{r reliability-analysis}
+# Mentioned briefly in Validity
+# Not used in Thesis since this needs to be done during pilot testing
+reliability_results <- purrr::imap_dfr(construct_items, function(items, construct_name) {
+  check_required_columns(data, items, paste("reliability analysis for", construct_name))
+  alpha_result <- psych::alpha(data[, items, drop = FALSE])
+  raw_alpha <- alpha_result$total$raw_alpha
+  std_alpha <- alpha_result$total$std.alpha
+  tibble(
+    Construct = construct_name,
+    Items = length(items),
+    Cronbach_alpha = round(raw_alpha, 3),
+    Standardised_alpha = round(std_alpha, 3),
+    Interpretation = case_when(
+      std_alpha >= .90 ~ "Excellent",
+      std_alpha >= .80 ~ "Good",
+      std_alpha >= .70 ~ "Acceptable",
+      std_alpha >= .60 ~ "Questionable",
+      std_alpha >= .50 ~ "Poor",
+      TRUE ~ "Unacceptable"
+    )
+  )
+})
+
+knitr::kable(reliability_results, caption = "Reliability analysis for directly measured constructs.")
+```
+
+## 7. Composite Score Computation
+
+<div style="text-align: justify;">
+This section computes the main TTAT construct scores used in descriptive statistics, visual analysis, and hypothesis testing. The directly measured lower-order constructs are calculated as row means of their five survey items. Perceived Threat and Perceived Avoidability were not directly measured in the final survey, they are operationalised as theory-informed derived summary indices.
+
+</div>
+
+```{r composite-scores}
+# Directly measured construct composites.
+data$perceived_susceptibility <- rowMeans(data[construct_items[["Perceived Susceptibility"]]], na.rm = TRUE)
+data$perceived_severity <- rowMeans(data[construct_items[["Perceived Severity"]]], na.rm = TRUE)
+data$perceived_effectiveness <- rowMeans(data[construct_items[["Perceived Effectiveness"]]], na.rm = TRUE)
+data$perceived_costs <- rowMeans(data[construct_items[["Perceived Costs"]]], na.rm = TRUE)
+data$self_efficacy <- rowMeans(data[construct_items[["Self-Efficacy"]]], na.rm = TRUE)
+data$avoidance_motivation <- rowMeans(data[construct_items[["Avoidance Motivation"]]], na.rm = TRUE)
+data$problem_focused_coping <- rowMeans(data[construct_items[["Problem-Focused Coping"]]], na.rm = TRUE)
+data$emotion_focused_coping <- rowMeans(data[construct_items[["Emotion-Focused Coping"]]], na.rm = TRUE)
+data$expected_institutional_measures <- rowMeans(data[construct_items[["Expected Institutional Measures"]]], na.rm = TRUE)
+
+# Derived appraisal indices
+
+data <- data %>%
+  mutate(
+    perceived_threat = (perceived_susceptibility + perceived_severity) / 2,
+    perceived_avoidability = (perceived_effectiveness + self_efficacy + (6 - perceived_costs)) / 3
+  )
+
+# Ordered numeric version used for the directional age-group regression.
+# GenAI experience and confidence numeric scores were retained during factor encoding.
+data <- data %>%
+  mutate(age_group_ordered = as.integer(age_group))
+```
+
+## 8. Descriptive Statistics
+
+<div style="text-align: justify;">
+
+This section summarises the TTAT construct scores before subgroup exploration and hypothesis testing. It examines central tendency, variability, and distribution shape for each composite score on the 1–5 response scale or directionally consistent derived scale.
+
+It will provide a baseline profile of how strongly respondents perceived cognitive risks, avoidability, motivation, coping behaviours, and institutional expectations.
+
+</div>
+
+### 8.1 TTAT Construct Summary Statistics
+
+<div style="text-align: justify;">
+
+This subsection calculates numeric summary statistics for each TTAT construct, including sample size, mean, median, standard deviation, minimum, maximum, interquartile range, skewness, and kurtosis.
+
+This will help interpret overall response tendencies and identifies whether each construct is generally low, moderate, or high in the analytical sample.
+
+</div>
+
+
+```{r descriptive-statistics}
+ttat_cols <- c(
+  "perceived_susceptibility",
+  "perceived_severity",
+  "perceived_threat",
+  "perceived_effectiveness",
+  "perceived_costs",
+  "self_efficacy",
+  "perceived_avoidability",
+  "avoidance_motivation",
+  "problem_focused_coping",
+  "emotion_focused_coping",
+  "expected_institutional_measures"
+)
+
+ttat_labels <- c(
+  "Perceived Susceptibility",
+  "Perceived Severity",
+  "Perceived Threat",
+  "Perceived Effectiveness",
+  "Perceived Costs",
+  "Self-Efficacy",
+  "Perceived Avoidability",
+  "Avoidance Motivation",
+  "Problem-Focused Coping",
+  "Emotion-Focused Coping",
+  "Expected Institutional Measures"
+)
+
+descriptives <- tibble(
+  Construct = ttat_labels,
+  n = sapply(data[ttat_cols], function(x) sum(!is.na(x))),
+  Mean = sapply(data[ttat_cols], mean, na.rm = TRUE),
+  Median = sapply(data[ttat_cols], median, na.rm = TRUE),
+  SD = sapply(data[ttat_cols], sd, na.rm = TRUE),
+  Min = sapply(data[ttat_cols], min, na.rm = TRUE),
+  Max = sapply(data[ttat_cols], max, na.rm = TRUE),
+  IQR = sapply(data[ttat_cols], IQR, na.rm = TRUE),
+  Skewness = sapply(data[ttat_cols], function(x) psych::skew(x, na.rm = TRUE)),
+  Kurtosis = sapply(data[ttat_cols], function(x) psych::kurtosi(x, na.rm = TRUE))
+) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 2)))
+
+knitr::kable(descriptives, caption = "Descriptive statistics for TTAT construct composite scores.")
+```
+
+### 8.2 Distribution of TTAT Construct Scores
+
+<div style="text-align: justify;">
+
+This subsection visualises the distribution of each TTAT composite score using histograms. 
+
+Mean and median reference lines are included to support visual comparisons of central tendency and distributional symmetry. The shape of each histogram indicates whether scores are distributed relatively symmetrically or concentrated toward one end of the scale. A longer tail on either side and a noticeable separation between the mean and median may suggest skewness, while unusually tall bars indicate clustering around particular score ranges. Concentrations near the highest or lowest possible composite scores may indicate ceiling or floor effects, respectively. Histograms can also reveal multiple peaks, gaps and potentially unusual observations, thereby providing an initial understanding of the distributional characteristics of the composite scores before regression testing (Ghasemi & Zahediasl, 2012; Ho & Yu, 2015).
+</div>
+
+
+```{r construct-histograms, fig.width=10, fig.height=12}
+plot_hist <- function(df, var, label) {
+  mean_value <- mean(df[[var]], na.rm = TRUE)
+  median_value <- median(df[[var]], na.rm = TRUE)
+
+  ggplot(df, aes(x = .data[[var]])) +
+    geom_histogram(bins = 15, fill = "steelblue", colour = "white", alpha = 0.8) +
+    geom_vline(xintercept = mean_value, colour = "red", linetype = "dashed", linewidth = 0.8) +
+    geom_vline(xintercept = median_value, colour = "blue", linetype = "dashed", linewidth = 0.8) +
+    labs(title = label, x = "Composite score", y = "Count") +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+      axis.title = element_text(size = 14),
+      axis.text = element_text(size = 12)
+    )
+}
+
+hist_plots <- mapply(
+  plot_hist,
+  var = ttat_cols,
+  label = ttat_labels,
+  MoreArgs = list(df = data),
+  SIMPLIFY = FALSE
+)
+
+grid.arrange(
+  grobs = hist_plots,
+  ncol = 3,
+  top = textGrob("Distribution of TTAT Construct Composite Scores", gp = gpar(fontsize = 20, fontface = "bold"))
+)
+```
+
+### 8.3 Descriptive Statistics for Expected Institutional Measures Items
+
+<div style="text-align: justify;">
+
+This subsection reports item-level descriptive statistics for the five Expected Institutional Measures (EIM) items. Unlike the construct-level statistics reported above, these results show how strongly respondents supported each specific institutional response. The mean and median indicate the typical level of agreement, while the standard deviation and interquartile range indicate response variability. Skewness and kurtosis provide additional information about the shape of each item's distribution.
+
+</div>
+
+```{r eim-item-descriptives}
+eim_item_labels <- c(
+  eim_guidelines = "Clear institutional guidelines for GenAI use",
+  eim_training = "Student training on responsible GenAI use",
+  eim_critical_integration = "Integration of critical GenAI use into learning activities",
+  eim_faculty_training = "Training for teaching staff on GenAI use",
+  eim_documentation = "Documentation and disclosure of GenAI use"
+)
+
+eim_item_cols <- names(eim_item_labels)
+
+check_required_columns(data, eim_item_cols, "EIM item-level descriptive statistics")
+
+eim_item_descriptives <- tibble(
+  Item = unname(eim_item_labels),
+  n = sapply(data[eim_item_cols], function(x) sum(!is.na(x))),
+  Mean = sapply(data[eim_item_cols], mean, na.rm = TRUE),
+  Median = sapply(data[eim_item_cols], median, na.rm = TRUE),
+  SD = sapply(data[eim_item_cols], sd, na.rm = TRUE),
+  Min = sapply(data[eim_item_cols], min, na.rm = TRUE),
+  Max = sapply(data[eim_item_cols], max, na.rm = TRUE),
+  IQR = sapply(data[eim_item_cols], IQR, na.rm = TRUE),
+  Skewness = sapply(data[eim_item_cols], function(x) psych::skew(x, na.rm = TRUE)),
+  Kurtosis = sapply(data[eim_item_cols], function(x) psych::kurtosi(x, na.rm = TRUE))
+) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 2)))
+
+knitr::kable(
+  eim_item_descriptives,
+  caption = "Descriptive statistics for Expected Institutional Measures items."
+)
+```
+
+## 9. Exploratory Data Analysis
+
+<div style="text-align: justify;">
+
+This section explores patterns in the data before formal hypothesis testing. It examines selected cognitive-risk concerns, subgroup differences in confidence and TTAT constructs, relationships between experiential factors and construct scores, correlations among TTAT constructs, and key conceptual-framework pathways.
+
+</div>
+
+### 9.1 Cognitive Risk Concern Endorsements
+
+<div style="text-align: justify;">
+
+This subsection summarises which cognitive risks students selected as concerning when using GenAI. Because the question allowed multiple selections, counts and percentages are calculated for each risk domain rather than summing to 100%.
+
+A frequency table and horizontal bar chart identifying the most commonly endorsed concerns, such as cognitive offloading, reduced critical thinking, superficial learning, overreliance, and reduced problem-solving are used for analysis.
+
+</div>
+
+
+```{r cognitive-risk-concerns, fig.width=9, fig.height=5}
+risk_labels <- c(
+  cognitive_risk_concerns___1 = "Cognitive offloading: relying on GenAI for thinking",
+  cognitive_risk_concerns___2 = "Reduced critical thinking: weakened analytical ability",
+  cognitive_risk_concerns___3 = "Superficial learning: only basic understanding",
+  cognitive_risk_concerns___4 = "Overreliance: GenAI as a shortcut/crutch",
+  cognitive_risk_concerns___5 = "Reduced problem-solving: loss of independent skill"
+)
+
+n_resp <- nrow(data)
+
+risk_freq <- data %>%
+  select(all_of(checkbox_cols)) %>%
+  summarise(across(everything(), ~ sum(.x, na.rm = TRUE))) %>%
+  pivot_longer(everything(), names_to = "item", values_to = "count") %>%
+  mutate(
+    risk = risk_labels[item],
+    percent = round(100 * count / n_resp, 1)
+  ) %>%
+  arrange(desc(count))
+
+knitr::kable(risk_freq %>% select(risk, count, percent),
+             caption = "Cognitive risks selected by respondents (multiple selections allowed)")
+
+data <- data %>%
+  mutate(n_risks_selected = rowSums(across(all_of(checkbox_cols)), na.rm = TRUE))
+
+ggplot(risk_freq, aes(x = reorder(risk, count), y = count)) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = paste0(count, " (", percent, "%)")), hjust = -0.1, size = 3.5) +
+  coord_flip() +
+  labs(
+    title = paste0("Cognitive Risks of GenAI Most Frequently Selected by Students", ", n = ", n_resp),
+    # subtitle = paste0("n = ", n_resp, "; multiple selections allowed"),
+    x = NULL,
+    y = "Number of respondents"
+  ) +
+  expand_limits(y = max(risk_freq$count) * 1.15) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.y = element_text(size = 12, hjust = 1),
+    plot.title = element_text(face = "bold"),
+    plot.title.position = "plot"
+  )
+```
+
+### 9.2 Perceived Threat by Demographic and Experiential Groups
+
+<div style="text-align: justify;">
+
+This subsection uses boxplots to compare Perceived Threat scores across demographic and experiential groups. The plots provide an exploratory visual assessment of whether the distribution of Perceived Threat appears to vary by gender, age, faculty, study level, enrolment type, prior GenAI experience, or confidence in using GenAI.
+
+For each group, the median line indicates the typical Perceived Threat score, while the box represents the interquartile range and the whiskers show the broader spread of the data. Differences in median positions, variability, and overlap between boxes may indicate possible subgroup patterns. Individual observations beyond the whiskers are displayed as potential outliers. These plots are descriptive and do not by themselves establish statistically significant group differences; the relevant regression analyses are used for hypothesis testing.
+
+</div>
+
+
+```{r perceived-threat-by-groups, fig.width=14, fig.height=18}
+perceived_threat_plots <- list(
+plot_construct_box(data, "perceived_threat", "gender", "Gender"),
+  plot_construct_box(data, "perceived_threat", "age_group", "Age Group"),
+  plot_construct_box(data, "perceived_threat", "faculty", "Faculty"),
+  plot_construct_box(data, "perceived_threat", "study_level", "Study Level"),
+  plot_construct_box(data, "perceived_threat", "enrollment_type", "Enrolment Type"),
+  plot_construct_box(data, "perceived_threat", "genai_exp_in_duration", "GenAI Experience"),
+  plot_construct_box(data, "perceived_threat", "confidence_level", "Confidence in Using GenAI")
+)
+
+grid.arrange(
+  grobs = perceived_threat_plots,
+  ncol = 2,
+  top = textGrob(
+    "Perceived Threat by Demographic and Experiential Groups",
+    gp = gpar(fontsize = 20, fontface = "bold")
+  )
+)
+```
+
+### 9.3 Confidence by Demographic and Experiential Groups
+
+<div style="text-align: justify;">
+
+This subsection uses boxplots to compare GenAI confidence across demographic and experiential groups. The purpose is to identify whether confidence appears to vary by gender, age, faculty, study level, enrolment type, or prior GenAI experience.
+
+Boxplots facilitate these comparisons by displaying the median confidence score, the interquartile range and the spread of scores within each group, together with observations that may be unusually high or low. Differences in the positions of the median lines may indicate possible differences in typical confidence levels, while differences in box and whisker lengths may indicate variation in the dispersion of confidence scores across groups. Substantial overlap between boxplots may suggest broadly similar distributions, whereas limited overlap may indicate potentially meaningful group differences requiring further statistical examination (Tukey, 1977).
+
+</div>
+
+
+```{r confidence-by-groups, fig.width=14, fig.height=16}
+plot_confidence_box <- function(df, var, title) {
+  ggplot(df, aes(x = .data[[var]], y = confidence_level_numeric, fill = .data[[var]])) +
+    geom_boxplot(alpha = 0.7, outlier.colour = "red") +
+    scale_y_continuous(breaks = 1:5, labels = levels(data$confidence_level)) +
+    labs(title = title, x = NULL, y = "Confidence level") +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 9, face = "bold", hjust = 0.5),
+      axis.text.x = element_text(size = 7, angle = 45, hjust = 1),
+      axis.text.y = element_text(size = 7),
+      axis.title.y = element_text(size = 8),
+      legend.position = "none"
+    )
+}
+
+confidence_plots <- list(
+  plot_confidence_box(data, "gender", "Gender"),
+  plot_confidence_box(data, "age_group", "Age Group"),
+  plot_confidence_box(data, "faculty", "Faculty"),
+  plot_confidence_box(data, "study_level", "Study Level"),
+  plot_confidence_box(data, "enrollment_type", "Enrolment Type"),
+  plot_confidence_box(data, "genai_exp_in_duration", "GenAI Experience")
+)
+
+grid.arrange(
+  grobs = confidence_plots,
+  ncol = 2,
+  top = textGrob("Confidence in Using GenAI by Demographic and Experiential Groups", gp = gpar(fontsize = 14, fontface = "bold"))
+)
+```
+
+### 9.4 TTAT Constructs by Demographic and Experiential Groups
+
+<div style="text-align: justify;">
+
+This subsection visualises selected TTAT construct scores across demographic and experiential groups using boxplot grids. It focuses on perceived threat, perceived avoidability, avoidance motivation, problem-focused coping, emotion-focused coping, and expected institutional measures.
+
+</div>
+
+
+```{r constructs-by-groups, fig.width=10, fig.height=8}
+grid_cols <- c(
+  "perceived_threat",
+  "perceived_avoidability",
+  "avoidance_motivation",
+  "problem_focused_coping",
+  "emotion_focused_coping",
+  "expected_institutional_measures"
+)
+
+grid_labels <- c(
+  "Perceived Threat",
+  "Perceived Avoidability",
+  "Avoidance Motivation",
+  "Problem-Focused Coping",
+  "Emotion-Focused Coping",
+  "Expected Institutional Measures"
+)
+
+plot_construct_grid <- function(df, group_var, group_label) {
+  plots <- mapply(
+    function(construct, label) plot_construct_box(df, construct, group_var, label),
+    construct = grid_cols,
+    label = grid_labels,
+    SIMPLIFY = FALSE
+  )
+
+  grid.arrange(
+    grobs = plots,
+    ncol = 3,
+    top = textGrob(paste("TTAT Constructs by", group_label), gp = gpar(fontsize = 14, fontface = "bold"))
+  )
+}
+
+plot_construct_grid(data, "gender", "Gender")
+plot_construct_grid(data, "age_group", "Age Group")
+plot_construct_grid(data, "faculty", "Faculty")
+plot_construct_grid(data, "study_level", "Study Level")
+plot_construct_grid(data, "enrollment_type", "Enrolment Type")
+plot_construct_grid(data, "genai_exp_in_duration", "GenAI Experience")
+plot_construct_grid(data, "confidence_level", "Confidence in Using GenAI")
+```
+
+### 9.5 Experiential Factors and TTAT Constructs
+
+<div style="text-align: justify;">
+
+This subsection examines relationships involving students' GenAI experience and confidence. It plots GenAI experience against confidence, then visualises how confidence relates to perceived threat, perceived avoidability, and avoidance motivation, and how GenAI experience relates to perceived threat and avoidability.
+
+</div>
+
+
+```{r experiential-scatterplots, fig.width=8, fig.height=5}
+ggplot(data, aes(x = genai_exp_in_duration_numeric, y = confidence_level_numeric)) +
+  geom_jitter(width = 0.2, height = 0.2, alpha = 0.5, colour = "steelblue") +
+  geom_smooth(method = "lm", se = TRUE, colour = "red") +
+  scale_x_continuous(breaks = 1:5, labels = levels(data$genai_exp_in_duration)) +
+  scale_y_continuous(breaks = 1:5, labels = levels(data$confidence_level)) +
+  labs(title = "GenAI Experience vs Confidence Level", x = "GenAI experience", y = "Confidence level") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+scatter_plot(data, "confidence_level_numeric", "perceived_threat", "Confidence level", "Perceived threat", "Confidence vs Perceived Threat") +
+  scale_x_continuous(breaks = 1:5, labels = levels(data$confidence_level))
+
+scatter_plot(data, "confidence_level_numeric", "perceived_avoidability", "Confidence level", "Perceived avoidability", "Confidence vs Perceived Avoidability") +
+  scale_x_continuous(breaks = 1:5, labels = levels(data$confidence_level))
+
+scatter_plot(data, "confidence_level_numeric", "avoidance_motivation", "Confidence level", "Avoidance motivation", "Confidence vs Avoidance Motivation") +
+  scale_x_continuous(breaks = 1:5, labels = levels(data$confidence_level))
+
+ggplot(data, aes(x = genai_exp_in_duration_numeric, y = perceived_threat)) +
+  geom_jitter(width = 0.2, height = 0.1, alpha = 0.5, colour = "steelblue") +
+  geom_smooth(method = "lm", se = TRUE, colour = "red") +
+  scale_x_continuous(breaks = 1:5, labels = levels(data$genai_exp_in_duration)) +
+  labs(title = "GenAI Experience vs Perceived Threat", x = "GenAI experience", y = "Perceived threat") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(data, aes(x = genai_exp_in_duration_numeric, y = perceived_avoidability)) +
+  geom_jitter(width = 0.2, height = 0.1, alpha = 0.5, colour = "steelblue") +
+  geom_smooth(method = "lm", se = TRUE, colour = "red") +
+  scale_x_continuous(breaks = 1:5, labels = levels(data$genai_exp_in_duration)) +
+  labs(title = "GenAI Experience vs Perceived Avoidability", x = "GenAI experience", y = "Perceived avoidability") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### 9.6 Correlation Heatmap of TTAT Constructs
+
+<div style="text-align: justify;">
+
+This subsection calculates Pearson correlations among the TTAT composite scores and presents them as a heatmap. The goal is to examine the strength and direction of relationships among appraisal, motivation, coping, and institutional expectation constructs.
+
+Correlation matrix visualisation can help identify strong and weak associations among variables before regression interpretation. 
+
+</div>
+
+
+```{r correlation-heatmap, fig.width=9, fig.height=8}
+correlation_cols <- c(
+  "perceived_susceptibility",
+  "perceived_severity",
+  "perceived_threat",
+  "perceived_effectiveness",
+  "perceived_costs",
+  "self_efficacy",
+  "perceived_avoidability",
+  "avoidance_motivation",
+  "problem_focused_coping",
+  "emotion_focused_coping",
+  "expected_institutional_measures"
+)
+
+correlation_matrix <- data %>%
+  select(all_of(correlation_cols)) %>%
+  cor(use = "pairwise.complete.obs", method = "pearson")
+
+colnames(correlation_matrix) <- rownames(correlation_matrix) <- c(
+  "Perceived Susceptibility",
+  "Perceived Severity",
+  "Perceived Threat",
+  "Perceived Effectiveness",
+  "Perceived Costs",
+  "Self-Efficacy",
+  "Perceived Avoidability",
+  "Avoidance Motivation",
+  "Problem-Focused Coping",
+  "Emotion-Focused Coping",
+  "Expected Institutional Measures"
+)
+
+correlation_long <- as.data.frame(as.table(correlation_matrix)) %>%
+  rename(Construct_1 = Var1, Construct_2 = Var2, Correlation = Freq)
+
+ggplot(correlation_long, aes(Construct_2, Construct_1, fill = Correlation)) +
+  geom_tile(colour = "white") +
+  geom_text(aes(label = round(Correlation, 2)), size = 2.8) +
+  scale_fill_gradient2(
+    low = "green",
+    high = "red",
+    mid = "white",
+    midpoint = 0,
+    limits = c(-1, 1),
+    name = "Correlation"
+  ) +
+  labs(title = "Correlation Heatmap of TTAT Constructs", x = NULL, y = NULL) +
+  theme(
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    axis.text.x = element_text(size = 8, angle = 45, vjust = 1, hjust = 1),
+    axis.text.y = element_text(size = 8)
+  ) +
+  coord_fixed()
+```
+
+### 9.7 Key TTAT Pathway Scatter Plots
+
+<div style="text-align: justify;">
+
+This subsection visualises the main conceptual pathways in the TTAT-extended framework using scatterplots with Ordinary Least Squares (OLS) trend lines. The plotted pathways include perceived threat, perceived avoidability, avoidance motivation, coping behaviours, and expected institutional measures. It provides a visual summary of whether hypothesised relationships appear to move in the expected direction before formal hypothesis tests are reported.
+
+</div>
+
+
+```{r ttat-pathway-scatterplots, fig.width=14, fig.height=16}
+pathway_scatter_plots <- list(
+  scatter_plot(data, "perceived_threat", "avoidance_motivation", "Perceived threat", "Avoidance motivation", "Perceived Threat vs Avoidance Motivation"),
+  scatter_plot(data, "perceived_avoidability", "expected_institutional_measures", "Perceived avoidability", "Expected institutional measures", "Perceived Avoidability vs Expected Institutional Measures"),
+  scatter_plot(data, "perceived_avoidability", "avoidance_motivation", "Perceived avoidability", "Avoidance motivation", "Perceived Avoidability vs Avoidance Motivation"),
+  scatter_plot(data, "avoidance_motivation", "problem_focused_coping", "Avoidance motivation", "Problem-focused coping", "Avoidance Motivation vs Problem-Focused Coping"),
+  scatter_plot(data, "avoidance_motivation", "emotion_focused_coping", "Avoidance motivation", "Emotion-focused coping", "Avoidance Motivation vs Emotion-Focused Coping"),
+  scatter_plot(data, "perceived_threat", "expected_institutional_measures", "Perceived threat", "Expected institutional measures", "Perceived Threat vs Expected Institutional Measures")
+)
+
+grid.arrange(
+  grobs = pathway_scatter_plots,
+  ncol = 2,
+  top = textGrob("Key TTAT Pathway Scatter Plots", gp = gpar(fontsize = 14, fontface = "bold"))
+)
+```
+
+## 10. Hypothesis Testing
+
+<div style="text-align: justify;">
+
+This section formally tests the 12 hypotheses derived from the TTAT-extended conceptual framework. Ordinal-score, binary-group, simple, and multiple linear regression models are used according to the structure of each hypothesis.
+
+The expected output for each hypothesis is a model summary plus a printed decision based on the predefined rule: a hypothesis is supported only when the unstandardised coefficient (B) is statistically significant at `p < .05` and its sign matches the predicted direction.
+
+</div>
+
+### 10.1 H1a: Age Group → Perceived Threat
+
+<div style="text-align: justify;">
+
+This subsection tests whether the derived perceived-threat index changes across ordered age groups. Age group is represented by an ordered numeric score from 1 to 5 and entered as the sole predictor in a linear regression. The coefficient therefore represents the estimated linear change in the derived threat index for each one-category increase in age group.
+
+</div>
+
+
+```{r h1a-model}
+h1a_model <- lm(perceived_threat ~ age_group_ordered, data = data)
+summary(h1a_model)
+
+h1a_Bp <- get_Bp(h1a_model, "age_group_ordered")
+cat(sprintf(
+  "H1a: B = %.3f, p = %s → %s\n",
+  h1a_Bp["B"], format_p(h1a_Bp["p"]), hypothesis_decision(h1a_Bp["B"], h1a_Bp["p"], "Positive")
+))
+```
+
+### 10.2 H1b: Faculty/Discipline → Perceived Threat
+
+<div style="text-align: justify;">
+
+This subsection tests a restricted binary comparison between a combined humanities and social-science group (Arts & Design, Business, Government & Law, and Education) and Science & Technology. A binary-group linear regression is fitted with Science & Technology as the reference category. Health and Other faculty responses are excluded from this specific model and the result should be interpreted only for the two groups retained.
+
+</div>
+
+```{r h1b-model}
+h1b_data <- data %>%
+  mutate(
+    discipline_group = case_when(
+      faculty %in% c(
+        "Arts & Design",
+        "Business, Govt & Law",
+        "Education"
+      ) ~ "HumSS",
+
+      faculty == "Science & Technology" ~ "STEM",
+
+      TRUE ~ NA_character_
+    ),
+    discipline_group = factor(
+      discipline_group,
+      levels = c("STEM", "HumSS")
+    )
+  )
+
+h1b_data <- h1b_data %>% filter(!is.na(discipline_group))
+
+h1b_model <- lm(perceived_threat ~ discipline_group, data = h1b_data)
+cat("H1b analysis sample (HumSS and STEM only):", nobs(h1b_model), "respondents.\n")
+summary(h1b_model)
+
+h1b_Bp <- get_Bp(
+  h1b_model, "discipline_groupHumSS")
+
+cat(sprintf("H1b: HumSS versus STEM: B = %.3f, p = %s → %s\n",
+  h1b_Bp["B"], format_p(h1b_Bp["p"]), hypothesis_decision(
+      h1b_Bp["B"],
+      h1b_Bp["p"],
+      "Positive"
+    )
+  )
+)
+
+```
+
+### 10.3 H1c: Study Level → Perceived Threat
+
+<div style="text-align: justify;">
+
+This subsection tests whether a combined postgraduate group differs from undergraduates on the derived perceived-threat index. Postgraduate coursework and Higher Degree by Research respondents are combined into one category, and a binary-group linear regression is fitted with undergraduates as the reference group.
+
+</div>
+
+
+```{r h1c-model}
+h1c_data <- data %>%
+  mutate(
+    study_group = case_when(
+      study_level == "Undergraduate" ~ "Undergraduate",
+      study_level %in% c(
+        "Postgraduate (Coursework)",
+        "Higher Degree by Research"
+      ) ~ "Postgraduate",
+      TRUE ~ NA_character_
+    ),
+    study_group = factor(
+      study_group,
+      levels = c("Undergraduate", "Postgraduate")
+    )
+  ) %>%
+  filter(!is.na(study_group))
+
+h1c_model <- lm(perceived_threat ~ study_group, data = h1c_data)
+cat("H1c analysis sample (undergraduate and combined postgraduate groups):", nobs(h1c_model), "respondents.\n")
+summary(h1c_model)
+
+h1c_Bp <- get_Bp(h1c_model, "study_groupPostgraduate")
+cat(sprintf(
+  "H1c: B = %.3f, p = %s → %s\n",
+  h1c_Bp["B"], format_p(h1c_Bp["p"]), hypothesis_decision(h1c_Bp["B"], h1c_Bp["p"], "Positive")
+))
+```
+
+### 10.4 H1d: Prior GenAI Experience → Perceived Threat
+
+<div style="text-align: justify;">
+
+This subsection tests whether students with more prior GenAI experience report lower perceived threat. GenAI experience is retained as a 1–5 ordered numeric score for the regression, while a separately labelled ordered factor is used in tables and visualisations.
+
+</div>
+
+
+```{r h1d-model}
+h1d_model <- lm(perceived_threat ~ genai_exp_in_duration_numeric, data = data)
+summary(h1d_model)
+
+h1d_Bp <- get_Bp(h1d_model, "genai_exp_in_duration_numeric")
+cat(sprintf(
+  "H1d: B = %.3f, p = %s → %s\n",
+  h1d_Bp["B"], format_p(h1d_Bp["p"]), hypothesis_decision(h1d_Bp["B"], h1d_Bp["p"], "Negative")
+))
+```
+
+### 10.5 H1e: Confidence in Using GenAI → Perceived Threat
+
+<div style="text-align: justify;">
+
+This subsection tests whether students who are more confident in using GenAI report lower perceived threat. Confidence is retained as a 1–5 ordered numeric score for the regression, while a separately labelled ordered factor is used in tables and visualisations.
+
+</div>
+
+
+```{r h1e-model}
+h1e_model <- lm(perceived_threat ~ confidence_level_numeric, data = data)
+summary(h1e_model)
+
+h1e_Bp <- get_Bp(h1e_model, "confidence_level_numeric")
+cat(sprintf(
+  "H1e: B = %.3f, p = %s → %s\n",
+  h1e_Bp["B"], format_p(h1e_Bp["p"]), hypothesis_decision(h1e_Bp["B"], h1e_Bp["p"], "Negative")
+))
+```
+
+### 10.6 H2a: Perceived Threat → Avoidance Motivation
+
+<div style="text-align: justify;">
+
+This subsection tests whether higher perceived threat predicts stronger avoidance motivation.
+
+</div>
+
+
+```{r h2a-model}
+h2a_model <- lm(avoidance_motivation ~ perceived_threat, data = data)
+summary(h2a_model)
+
+h2a_Bp <- get_Bp(h2a_model, "perceived_threat")
+cat(sprintf(
+  "H2a: B = %.3f, p = %s → %s\n",
+  h2a_Bp["B"], format_p(h2a_Bp["p"]), hypothesis_decision(h2a_Bp["B"], h2a_Bp["p"], "Positive")
+))
+```
+
+### 10.7 H2b: Perceived Avoidability → Avoidance Motivation
+
+<div style="text-align: justify;">
+
+This subsection tests whether higher perceived avoidability predicts stronger avoidance motivation.
+
+</div>
+
+
+```{r h2b-model}
+h2b_model <- lm(avoidance_motivation ~ perceived_avoidability, data = data)
+summary(h2b_model)
+
+h2b_Bp <- get_Bp(h2b_model, "perceived_avoidability")
+cat(sprintf(
+  "H2b: B = %.3f, p = %s → %s\n",
+  h2b_Bp["B"], format_p(h2b_Bp["p"]), hypothesis_decision(h2b_Bp["B"], h2b_Bp["p"], "Positive")
+))
+```
+
+### 10.8 H2c: Avoidance Motivation → Problem-Focused Coping
+
+<div style="text-align: justify;">
+
+This subsection tests whether students with stronger avoidance motivation report more problem-focused coping behaviours, such as fact-checking, editing, cross-checking, and limiting GenAI use to specific tasks.
+
+</div>
+
+
+```{r h2c-model}
+h2c_model <- lm(problem_focused_coping ~ avoidance_motivation, data = data)
+summary(h2c_model)
+
+h2c_Bp <- get_Bp(h2c_model, "avoidance_motivation")
+cat(sprintf(
+  "H2c: B = %.3f, p = %s → %s\n",
+  h2c_Bp["B"], format_p(h2c_Bp["p"]), hypothesis_decision(h2c_Bp["B"], h2c_Bp["p"], "Positive")
+))
+```
+
+### 10.9 H2d: Avoidance Motivation → Emotion-Focused Coping
+
+<div style="text-align: justify;">
+
+This subsection tests whether stronger avoidance motivation is associated with lower emotion-focused coping, such as denial, normalisation, distancing, or optimism bias.
+
+</div>
+
+
+```{r h2d-model}
+h2d_model <- lm(emotion_focused_coping ~ avoidance_motivation, data = data)
+summary(h2d_model)
+
+h2d_Bp <- get_Bp(h2d_model, "avoidance_motivation")
+cat(sprintf(
+  "H2d: B = %.3f, p = %s → %s\n",
+  h2d_Bp["B"], format_p(h2d_Bp["p"]), hypothesis_decision(h2d_Bp["B"], h2d_Bp["p"], "Negative")
+))
+```
+
+### 10.10 H2e: Coping Appraisal Components → Avoidance Motivation
+
+<div style="text-align: justify;">
+
+This subsection conducts an adapted direct-effects analysis in which Perceived Effectiveness, Perceived Costs, and Self-Efficacy are entered simultaneously as predictors of Avoidance Motivation. Positive coefficients are expected for effectiveness and self-efficacy and a negative coefficient for costs. This model does not independently test TTAT Proposition 5, which positions these components as antecedents of Perceived Avoidability, because the study's Perceived Avoidability index is mathematically constructed from the same three components.
+
+</div>
+
+```{r h2e-model}
+h2e_model <- lm(
+  avoidance_motivation ~ perceived_effectiveness + perceived_costs + self_efficacy,
+  data = data
+)
+summary(h2e_model)
+
+h2e_eff_Bp <- get_Bp(h2e_model, "perceived_effectiveness")
+h2e_cost_Bp <- get_Bp(h2e_model, "perceived_costs")
+h2e_se_Bp <- get_Bp(h2e_model, "self_efficacy")
+
+cat(sprintf(
+  "H2e effectiveness: B = %.3f, p = %s → %s\n",
+  h2e_eff_Bp["B"], format_p(h2e_eff_Bp["p"]), hypothesis_decision(h2e_eff_Bp["B"], h2e_eff_Bp["p"], "Positive")
+))
+cat(sprintf(
+  "H2e costs: B = %.3f, p = %s → %s\n",
+  h2e_cost_Bp["B"], format_p(h2e_cost_Bp["p"]), hypothesis_decision(h2e_cost_Bp["B"], h2e_cost_Bp["p"], "Negative")
+))
+cat(sprintf(
+  "H2e self-efficacy: B = %.3f, p = %s → %s\n",
+  h2e_se_Bp["B"], format_p(h2e_se_Bp["p"]), hypothesis_decision(h2e_se_Bp["B"], h2e_se_Bp["p"], "Positive")
+))
+```
+
+### 10.11 H3a: Perceived Threat → Expected Institutional Measures
+
+<div style="text-align: justify;">
+
+This subsection tests whether students who perceive greater cognitive threat also expect stronger institutional measures from the university.
+
+</div>
+
+
+```{r h3a-model}
+h3a_model <- lm(expected_institutional_measures ~ perceived_threat, data = data)
+summary(h3a_model)
+
+h3a_Bp <- get_Bp(h3a_model, "perceived_threat")
+cat(sprintf(
+  "H3a: B = %.3f, p = %s → %s\n",
+  h3a_Bp["B"], format_p(h3a_Bp["p"]), hypothesis_decision(h3a_Bp["B"], h3a_Bp["p"], "Positive")
+))
+```
+
+### 10.12 H3b: Perceived Avoidability → Expected Institutional Measures
+
+<div style="text-align: justify;">
+
+This subsection tests whether students who perceive cognitive risks as more avoidable also expect stronger institutional measures.
+
+</div>
+
+
+```{r h3b-model}
+h3b_model <- lm(expected_institutional_measures ~ perceived_avoidability, data = data)
+summary(h3b_model)
+
+h3b_Bp <- get_Bp(h3b_model, "perceived_avoidability")
+cat(sprintf(
+  "H3b: B = %.3f, p = %s → %s\n",
+  h3b_Bp["B"], format_p(h3b_Bp["p"]), hypothesis_decision(h3b_Bp["B"], h3b_Bp["p"], "Positive")
+))
+```
+
+## 11. Regression Diagnostics
+
+<div style="text-align: justify;">
+
+This section evaluates the fitted linear models after estimation and before the final hypothesis summary. The diagnostics examine residual normality, non-constant error variance, and potentially influential observations. Variance inflation factors are also reported for H2e, the only multiple-predictor model. Diagnostic p-values are treated as indicators to be interpreted together with residual plots rather than as automatic model-rejection rules.
+
+</div>
+
+```{r regression-diagnostics}
+hypothesis_models <- list(
+  H1a = h1a_model,
+  H1b = h1b_model,
+  H1c = h1c_model,
+  H1d = h1d_model,
+  H1e = h1e_model,
+  H2a = h2a_model,
+  H2b = h2b_model,
+  H2c = h2c_model,
+  H2d = h2d_model,
+  H2e = h2e_model,
+  H3a = h3a_model,
+  H3b = h3b_model
+)
+
+diagnostic_summary <- purrr::imap_dfr(hypothesis_models, function(model, hypothesis) {
+  residual_values <- residuals(model)
+  n_model <- nobs(model)
+  cooks_values <- cooks.distance(model)
+
+  shapiro_p <- if (length(residual_values) >= 3 && length(residual_values) <= 5000) {
+    shapiro.test(residual_values)$p.value
+  } else {
+    NA_real_
+  }
+
+  ncv_p <- tryCatch(
+    car::ncvTest(model)$p,
+    error = function(e) NA_real_
+  )
+
+  tibble(
+    Hypothesis = hypothesis,
+    n = n_model,
+    R2 = get_r2(model),
+    Adjusted_R2 = get_adj_r2(model),
+    Shapiro_Wilk_p = shapiro_p,
+    Nonconstant_Variance_p = ncv_p,
+    Influential_Cases_4_over_n = sum(cooks_values > (4 / n_model), na.rm = TRUE),
+    Maximum_Cooks_D = max(cooks_values, na.rm = TRUE)
+  )
+}) %>%
+  mutate(
+    across(c(R2, Adjusted_R2, Maximum_Cooks_D), ~ round(.x, 3)),
+    Shapiro_Wilk_p = format_p(Shapiro_Wilk_p),
+    Nonconstant_Variance_p = format_p(Nonconstant_Variance_p)
+  )
+
+knitr::kable(
+  diagnostic_summary,
+  caption = "Regression diagnostic indicators for the 12 hypothesis models."
+)
+
+h2e_vif <- tibble(
+  Predictor = names(car::vif(h2e_model)),
+  VIF = as.numeric(car::vif(h2e_model))
+) %>%
+  mutate(VIF = round(VIF, 3))
+
+knitr::kable(
+  h2e_vif,
+  caption = "Variance inflation factors for the H2e multiple linear regression model."
+)
+```
+
+```{r optional-diagnostic-plots, eval=FALSE, echo=TRUE}
+# Run manually when detailed residual plots are required.
+purrr::iwalk(hypothesis_models, ~ diagnose_lm(.x, paste(.y, "linear model")))
+```
+
+## 12. Hypothesis Decision Summary
+
+<div style="text-align: justify;">
+
+This section consolidates the hypothesis-test results. The first table reports each estimated path, including the three component coefficients within H2e. The second table reports one overall decision for each of the 12 hypotheses; H2e is classified as partially supported when at least one, but not all, of its three predicted component paths is supported.
+
+</div>
+
+```{r hypothesis-summary}
+detailed_hypothesis_summary <- tibble::tribble(
+  ~Hypothesis,  ~Predictor,                                      ~Outcome,                          ~Model,             ~ExpectedDirection,
+  "H1a",        "Age group (ordered score)",                    "Perceived threat",               "Ordinal-score LM", "Positive",
+  "H1b",        "Discipline group (HumSS vs STEM)",             "Perceived threat",               "Binary-group LM",  "Positive",
+  "H1c",        "Study group (postgraduate vs undergraduate)",  "Perceived threat",               "Binary-group LM",  "Positive",
+  "H1d",        "Prior GenAI experience (ordered score)",       "Perceived threat",               "Ordinal-score LM", "Negative",
+  "H1e",        "Confidence using GenAI (ordered score)",       "Perceived threat",               "Ordinal-score LM", "Negative",
+  "H2a",        "Perceived threat",                             "Avoidance motivation",           "Simple LM",        "Positive",
+  "H2b",        "Perceived avoidability",                       "Avoidance motivation",           "Simple LM",        "Positive",
+  "H2c",        "Avoidance motivation",                         "Problem-focused coping",         "Simple LM",        "Positive",
+  "H2d",        "Avoidance motivation",                         "Emotion-focused coping",         "Simple LM",        "Negative",
+  "H2e (Eff)",  "Perceived effectiveness",                      "Avoidance motivation",           "Multiple LM",      "Positive",
+  "H2e (Cost)", "Perceived costs",                              "Avoidance motivation",           "Multiple LM",      "Negative",
+  "H2e (SE)",   "Self-efficacy",                                "Avoidance motivation",           "Multiple LM",      "Positive",
+  "H3a",        "Perceived threat",                             "Expected institutional measures","Simple LM",        "Positive",
+  "H3b",        "Perceived avoidability",                       "Expected institutional measures","Simple LM",        "Positive"
+)
+
+estimate_matrix <- rbind(
+  h1a_Bp,
+  h1b_Bp,
+  h1c_Bp,
+  h1d_Bp,
+  h1e_Bp,
+  h2a_Bp,
+  h2b_Bp,
+  h2c_Bp,
+  h2d_Bp,
+  h2e_eff_Bp,
+  h2e_cost_Bp,
+  h2e_se_Bp,
+  h3a_Bp,
+  h3b_Bp
+)
+
+r2_values <- c(
+  get_r2(h1a_model),
+  get_r2(h1b_model),
+  get_r2(h1c_model),
+  get_r2(h1d_model),
+  get_r2(h1e_model),
+  get_r2(h2a_model),
+  get_r2(h2b_model),
+  get_r2(h2c_model),
+  get_r2(h2d_model),
+  rep(get_r2(h2e_model), 3),
+  get_r2(h3a_model),
+  get_r2(h3b_model)
+)
+
+stopifnot(
+  nrow(detailed_hypothesis_summary) == nrow(estimate_matrix),
+  nrow(detailed_hypothesis_summary) == length(r2_values)
+)
+
+detailed_hypothesis_summary <- detailed_hypothesis_summary %>%
+  mutate(
+    Estimate_raw = unname(estimate_matrix[, "B"]),
+    p_raw = unname(estimate_matrix[, "p"]),
+    R2_raw = r2_values,
+    Decision = hypothesis_decision(Estimate_raw, p_raw, ExpectedDirection),
+    B = round(Estimate_raw, 3),
+    p = format_p(p_raw),
+    `R²` = round(R2_raw, 3)
+  ) %>%
+  select(
+    Hypothesis,
+    `Independent Variable` = Predictor,
+    `Dependent Variable` = Outcome,
+    Model,
+    `Expected Direction` = ExpectedDirection,
+    B,
+    p,
+    `R²`,
+    Decision
+  )
+
+knitr::kable(
+  detailed_hypothesis_summary,
+  caption = "Detailed coefficient and decision summary for the updated TTAT-extended framework."
+)
+
+path_decision <- function(label) {
+  detailed_hypothesis_summary %>%
+    filter(Hypothesis == label) %>%
+    pull(Decision)
+}
+
+h2e_component_decisions <- c(
+  path_decision("H2e (Eff)"),
+  path_decision("H2e (Cost)"),
+  path_decision("H2e (SE)")
+)
+
+h2e_overall_decision <- case_when(
+  all(h2e_component_decisions == "Supported") ~ "Supported",
+  any(h2e_component_decisions == "Supported") ~ "Partially supported",
+  TRUE ~ "Not supported"
+)
+
+overall_hypothesis_summary <- tibble(
+  Hypothesis = c("H1a", "H1b", "H1c", "H1d", "H1e", "H2a", "H2b", "H2c", "H2d", "H2e", "H3a", "H3b"),
+  Decision = c(
+    path_decision("H1a"),
+    path_decision("H1b"),
+    path_decision("H1c"),
+    path_decision("H1d"),
+    path_decision("H1e"),
+    path_decision("H2a"),
+    path_decision("H2b"),
+    path_decision("H2c"),
+    path_decision("H2d"),
+    h2e_overall_decision,
+    path_decision("H3a"),
+    path_decision("H3b")
+  )
+)
+
+knitr::kable(
+  overall_hypothesis_summary,
+  caption = "Overall decisions for the 12 hypotheses in the updated thesis."
+)
+
+hypothesis_decision_counts <- overall_hypothesis_summary %>%
+  count(Decision, name = "Number of hypotheses")
+
+knitr::kable(
+  hypothesis_decision_counts,
+  caption = "Number of supported, partially supported, and unsupported hypotheses."
+)
+```
+
+## 13. Open-Ended Responses
+
+<div style="text-align: justify;">
+
+This section extracts non-empty responses from the three open-ended survey questions using the complete analytical dataset `data`. These outputs are not used for formal qualitative coding in this pipeline; instead, they provide contextual comments that can help interpret the quantitative findings and identify useful quotations or themes for discussion.
+
+</div>
+
+```{r open-ended-response-preparation}
+open_text_source <- data
+
+select_non_empty_responses <- function(df, variable_name) {
+  check_required_columns(df, variable_name, paste("open-ended response extraction for", variable_name))
+  df %>%
+    mutate(response_no = row_number()) %>%
+    transmute(
+      response_no,
+      response = trimws(as.character(.data[[variable_name]]))
+    ) %>%
+    filter(!is.na(response), response != "")
+}
+
+print_open_responses <- function(response_tbl) {
+  if (nrow(response_tbl) == 0) {
+    cat("_No non-empty responses were provided._")
+  } else {
+    cat(paste(response_tbl$response, collapse = "\n\n"))
+  }
+}
+
+cols_to_check <- c("eim_from_institution")
+valid_rows_count <- sum(rowSums(is.na(open_text_source[cols_to_check]) | open_text_source[cols_to_check] == "") == 0)
+print(valid_rows_count)
+
+
+improvement_needed_responses <- select_non_empty_responses(open_text_source, "improvement_needed")
+risk_influence_responses <- select_non_empty_responses(open_text_source, "risk_influence")
+additional_comments_responses <- select_non_empty_responses(open_text_source, "eim_from_institution")
+```
+
+### 13.1 Suggested Improvements to University GenAI Guidelines
+
+<div style="text-align: justify;">
+
+This subsection prints responses to the question asking students what improvements they would suggest if university GenAI guidelines are unclear or unhelpful.
+
+</div>
+
+
+The following responses answer: *If no or unsure, what improvements would you suggest?*
+
+```{r q54-print-open-responses, results='asis', echo=FALSE}
+print_open_responses(improvement_needed_responses)
+```
+
+### 13.2 Influence of GenAI Concerns on Academic Use
+
+<div style="text-align: justify;">
+
+This subsection prints responses to the question asking how concerns about GenAI influence students' academic use of the technology.
+
+</div>
+
+
+The following responses answer: *How do your concerns about GenAI influence how you use it for academic tasks?*
+
+```{r q61-print-open-responses, results='asis', echo=FALSE}
+print_open_responses(risk_influence_responses)
+```
+
+### 13.3 Additional Comments on GenAI in Higher Education
+
+<div style="text-align: justify;">
+
+This subsection prints any additional comments students provided about GenAI in higher education.
+
+</div>
+
+
+The following responses answer: *Do you have any additional comments on using GenAI in higher education?*
+
+```{r q62-print-open-responses, results='asis', echo=FALSE}
+print_open_responses(additional_comments_responses)
+```
+
+## 14. Reproducibility Information
+
+<div style="text-align: justify;">
+
+This final section prints the R session information used to run the analysis.
+
+It includes the R version, operating system, attached packages, and package versions, which supports reproducibility and helps diagnose differences if the pipeline is rerun on another computer or at a later date.
+
+</div>
+
+
+```{r reproducibility-info}
+sessionInfo()
+```
