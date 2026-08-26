@@ -1,6 +1,6 @@
 ---
 title: "Data Analysis Pipeline"
-author: "Tshering Wangchuk (u3254369)"
+author: "Tshering Wangchuk"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 description: >
   Reproducible R Markdown analysis for the thesis titled "Conceptualising Technology Threat
@@ -204,7 +204,7 @@ This section imports the two REDCap CSV exports (`data_1.csv` and `data_2.csv`),
 
 ```{r data-import}
 # Print working directory
-cat("Working directory:", getwd(), "\n")
+# cat("Working directory:", getwd(), "\n")
 
 # CSV files exported from REDCap are named data_1 and data_2
 # Check if the files are in working directory
@@ -1812,6 +1812,7 @@ print_open_responses <- function(response_tbl) {
 
 cols_to_check <- c("eim_from_institution")
 valid_rows_count <- sum(rowSums(is.na(open_text_source[cols_to_check]) | open_text_source[cols_to_check] == "") == 0)
+
 print(valid_rows_count)
 
 
@@ -1830,9 +1831,11 @@ This subsection prints responses to the question asking students what improvemen
 
 
 The following responses answer: *If no or unsure, what improvements would you suggest?*
+Actual responses not printed for public view.
 
 ```{r q54-print-open-responses, results='asis', echo=FALSE}
-print_open_responses(improvement_needed_responses)
+# Commented so that actual responses are not printed
+#print_open_responses(improvement_needed_responses)
 ```
 
 ### 13.2 Influence of GenAI Concerns on Academic Use
@@ -1845,9 +1848,11 @@ This subsection prints responses to the question asking how concerns about GenAI
 
 
 The following responses answer: *How do your concerns about GenAI influence how you use it for academic tasks?*
+Actual responses not printed for public view.
 
 ```{r q61-print-open-responses, results='asis', echo=FALSE}
-print_open_responses(risk_influence_responses)
+# Commented so that actual responses are not printed
+#print_open_responses(risk_influence_responses)
 ```
 
 ### 13.3 Additional Comments on GenAI in Higher Education
@@ -1860,9 +1865,11 @@ This subsection prints any additional comments students provided about GenAI in 
 
 
 The following responses answer: *Do you have any additional comments on using GenAI in higher education?*
+Actual responses not printed for public view.
 
 ```{r q62-print-open-responses, results='asis', echo=FALSE}
-print_open_responses(additional_comments_responses)
+# Commented so that actual responses are not printed
+#print_open_responses(additional_comments_responses)
 ```
 
 ## 14. Reproducibility Information
