@@ -20,7 +20,7 @@ The files are provided to improve the transparency, traceability, and reproducib
 | File | Description |
 |---|---|
 | [`Data_Analysis_Source_File.Rmd`](./Data_Analysis_Source.Rmd) | The executable R Markdown source file containing the R code, analytical steps, comments, tables, and figures used in the study. |
-| [`Data_Analysis_Output_With_R_Scripts.html`](./Data_Analysis_Output.html) | The knitted HTML output generated from the R Markdown file. It provides a viewable record of the code, outputs, tables, figures, model results, and diagnostics produced during the analysis. |
+| [`Data_Analysis_Output.html`](./Data_Analysis_Output.html) | The knitted HTML output generated from the R Markdown file. It provides a viewable record of the code, outputs, tables, figures, model results, and diagnostics produced during the analysis. |
 
 ## Purpose of the Analysis
 
