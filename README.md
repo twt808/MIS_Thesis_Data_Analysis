@@ -108,7 +108,7 @@ The cleaned analytical dataset is recreated within the R Markdown workflow rathe
 
 ## Data Availability and Confidentiality
 
-The raw survey data are not publicly available because they were collected from human participants under University of Canberra ethics approval and are subject to research-data management, confidentiality, and secure-storage requirements.
+The raw survey data are not publicly available because they were collected from human participants under case university's ethics approval and are subject to research-data management, confidentiality, and secure-storage requirements.
 
 The main survey was designed to collect anonymous responses. Optional contact information used for the prize draw or distribution of the research summary was collected and stored separately from the survey responses.
 
@@ -135,10 +135,8 @@ When referring to the analytical materials in this repository, the following for
 
 ## Ethics
 
-The study received approval from the University of Canberra Human Research Ethics Committee under **Project ID 76147**.
+The study received approval from the case university's Human Research Ethics Committee under **Project ID 76147**.
 
 ## Contact
 
 **Tshering Wangchuk**  
-Master of Information Science (Research)  
-University of Canberra  
